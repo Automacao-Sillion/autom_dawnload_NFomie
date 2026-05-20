@@ -48,7 +48,7 @@ def resolver_logo_url() -> str:
 # Config da página
 # ============================================================
 st.set_page_config(
-    page_title="Sillion · Envio de lançamento - Vale",
+    page_title="Sillion · Dawnload de NFSe e XML",
     page_icon="",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -157,7 +157,7 @@ def enviar_para_n8n(url: str, payload: dict) -> requests.Response:
 inject(render_template("header", logo_url=resolver_logo_url()))
 inject(render_template(
     "hero",
-    titulo="Envio de lançamento - Vale",
+    titulo="Dawnload de NFSe e XML",
     subtitulo='Envie o "arquivo vale" de lançamento para processamento automático. '
               "O relatório retornará no seu email.",
 ))
