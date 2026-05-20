@@ -282,15 +282,3 @@ if enviar:
 # UI — Footer (vindo do template HTML)
 # ============================================================
 inject(render_template("footer", ano=datetime.now().year))
-ceptions.Timeout:
-                st.error("Tempo de resposta excedido. Verifique se o N8N está acessível.")
-            except requests.exceptions.ConnectionError:
-                st.error("Falha de conexão. Verifique a URL do webhook.")
-            except Exception as exc:
-                st.error(f"Erro inesperado: {exc}")
-
-
-# ============================================================
-# UI — Footer (vindo do template HTML)
-# ============================================================
-inject(render_template("footer", ano=datetime.now().year))
