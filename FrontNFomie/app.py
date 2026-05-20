@@ -65,6 +65,9 @@ EMAIL_REGEX = re.compile(
 
 TIMEOUT_REQ = 120  # segundos
 
+# Opções de empresa/fonte a serem extraídas
+EMPRESAS_OPCOES = ["TOT", "VALE"]
+
 
 # ============================================================
 # Helpers de renderização (templates + CSS)
@@ -125,17 +128,20 @@ def montar_payload(
     email: str,
     data_inicial: date,
     data_final: date,
+    empresas: list,
     cnpj: str = "",
 ) -> dict:
     """
     Payload enviado ao backend N8N.
     - data_inicial / data_final: ISO 8601 (YYYY-MM-DD)
+    - empresas: lista com uma ou mais entre EMPRESAS_OPCOES (ex.: ["TOT", "VALE"])
     - cnpj: apenas dígitos; string vazia quando não informado (opcional)
     """
     return {
         "email": email.strip(),
         "data_inicial": data_inicial.isoformat(),
         "data_final": data_final.isoformat(),
+        "empresas": list(empresas),
         "cnpj": somente_digitos(cnpj),
     }
 
@@ -204,6 +210,14 @@ with col_fim:
         format="DD/MM/YYYY",
     )
 
+empresas = st.multiselect(
+    "Empresas",
+    options=EMPRESAS_OPCOES,
+    default=[],
+    placeholder="Selecione TOT, VALE ou ambas",
+    help="Selecione uma ou as duas opções. Pelo menos uma é obrigatória.",
+)
+
 st.write("")
 enviar = st.button("Download", type="primary", use_container_width=True)
 
@@ -229,6 +243,9 @@ if enviar:
     if data_inicial and data_final and data_inicial > data_final:
         erros.append("A data inicial não pode ser posterior à data final.")
 
+    if not empresas:
+        erros.append("Selecione pelo menos uma empresa (TOT e/ou VALE).")
+
     # CNPJ é opcional — só valida se foi preenchido
     cnpj_digitos = somente_digitos(cnpj)
     if cnpj.strip() and len(cnpj_digitos) != 14:
@@ -240,7 +257,7 @@ if enviar:
     else:
         with st.spinner("Solicitando extração ao backend..."):
             try:
-                payload = montar_payload(email, data_inicial, data_final, cnpj)
+                payload = montar_payload(email, data_inicial, data_final, empresas, cnpj)
                 resp = enviar_para_n8n(WEBHOOK_URL, payload)
 
                 if 200 <= resp.status_code < 300:
@@ -257,6 +274,7 @@ if enviar:
                             f"{data_inicial.strftime('%d/%m/%Y')} a "
                             f"{data_final.strftime('%d/%m/%Y')}"
                         )
+                        st.caption(f"Empresas: {', '.join(empresas)}")
                         if cnpj_digitos:
                             st.caption(f"CNPJ: {cnpj.strip()}")
                         st.caption(
