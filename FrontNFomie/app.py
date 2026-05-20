@@ -1,6 +1,7 @@
 """
-Envio de faturamento — Front Streamlit (Sillion)
-Encaminha arquivo (xlsx/xlsb/csv) + email para o backend N8N via POST JSON com base64.
+Download de NFSe e XML — Front Streamlit (Sillion)
+Encaminha período (data inicial/final) + email + CNPJ (opcional) para o backend
+N8N via POST JSON. O backend retorna o relatório de extração por e-mail.
 
 Arquitetura:
 - app.py        → lógica Python (config, envio, widgets de input)
@@ -8,10 +9,8 @@ Arquitetura:
 - templates/    → HTML estrutural (header, hero, footer, etc.)
 """
 
-import base64
 import re
-import mimetypes
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 
 import requests
@@ -63,15 +62,8 @@ EMAIL_REGEX = re.compile(
     rf"^[A-Za-z0-9._%+\-]+@{re.escape(DOMINIO_PERMITIDO)}$",
     re.IGNORECASE,
 )
-TIPOS_ACEITOS = ["xlsx", "xlsb", "csv"]
 
 TIMEOUT_REQ = 120  # segundos
-
-MIME_FALLBACK = {
-    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "xlsb": "application/vnd.ms-excel.sheet.binary.macroEnabled.12",
-    "csv": "text/csv",
-}
 
 
 # ============================================================
@@ -124,21 +116,27 @@ def email_valido(email: str) -> bool:
     return bool(EMAIL_REGEX.match(email.strip()))
 
 
-def detectar_mime(filename: str) -> str:
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext in MIME_FALLBACK:
-        return MIME_FALLBACK[ext]
-    mime, _ = mimetypes.guess_type(filename)
-    return mime or "application/octet-stream"
+def somente_digitos(valor: str) -> str:
+    """Remove qualquer caractere que não seja dígito (útil para CNPJ)."""
+    return re.sub(r"\D", "", valor or "")
 
 
-def montar_payload(email: str, arquivo) -> dict:
-    conteudo = arquivo.getvalue()
+def montar_payload(
+    email: str,
+    data_inicial: date,
+    data_final: date,
+    cnpj: str = "",
+) -> dict:
+    """
+    Payload enviado ao backend N8N.
+    - data_inicial / data_final: ISO 8601 (YYYY-MM-DD)
+    - cnpj: apenas dígitos; string vazia quando não informado (opcional)
+    """
     return {
         "email": email.strip(),
-        "filename": arquivo.name,
-        "file_base64": base64.b64encode(conteudo).decode("utf-8"),
-        "mime_type": detectar_mime(arquivo.name),
+        "data_inicial": data_inicial.isoformat(),
+        "data_final": data_final.isoformat(),
+        "cnpj": somente_digitos(cnpj),
     }
 
 
@@ -158,8 +156,7 @@ inject(render_template("header", logo_url=resolver_logo_url()))
 inject(render_template(
     "hero",
     titulo="Dawnload de NFSe e XML",
-    subtitulo='Envie o "arquivo vale" de lançamento para processamento automático. '
-              "O relatório retornará no seu email.",
+    subtitulo="Extração de arquivos PDF e XML de acordo com o período selecionado.",
 ))
 
 
@@ -185,22 +182,30 @@ email = st.text_input(
          "O relatório processado será enviado para este endereço.",
 )
 
-arquivo = st.file_uploader(
-    "Arquivo de faturamento",
-    type=TIPOS_ACEITOS,
-    help="Formatos aceitos: .xlsx, .xlsb, .csv",
+cnpj = st.text_input(
+    "CNPJ (opcional)",
+    placeholder="00.000.000/0000-00",
+    help="Filtre a extração por um CNPJ específico. "
+         "Deixe em branco para considerar todos os CNPJs.",
 )
 
-if arquivo is not None:
-    tamanho_mb = len(arquivo.getvalue()) / (1024 * 1024)
-    inject(render_template(
-        "file_preview",
-        nome_arquivo=arquivo.name,
-        tamanho_mb=f"{tamanho_mb:.2f}",
-    ))
+st.markdown("**Período selecionado:**")
+col_ini, col_fim = st.columns(2)
+with col_ini:
+    data_inicial = st.date_input(
+        "Data inicial",
+        value=None,
+        format="DD/MM/YYYY",
+    )
+with col_fim:
+    data_final = st.date_input(
+        "Data final",
+        value=None,
+        format="DD/MM/YYYY",
+    )
 
 st.write("")
-enviar = st.button("Enviar arquivo", type="primary", use_container_width=True)
+enviar = st.button("Download", type="primary", use_container_width=True)
 
 
 # ============================================================
@@ -216,27 +221,44 @@ if enviar:
             f"Email inválido. Use um endereço corporativo @{DOMINIO_PERMITIDO} "
             "(ex: seu.nome@" + DOMINIO_PERMITIDO + ")."
         )
-    if arquivo is None:
-        erros.append("Selecione um arquivo para enviar.")
+
+    if data_inicial is None:
+        erros.append("Informe a data inicial.")
+    if data_final is None:
+        erros.append("Informe a data final.")
+    if data_inicial and data_final and data_inicial > data_final:
+        erros.append("A data inicial não pode ser posterior à data final.")
+
+    # CNPJ é opcional — só valida se foi preenchido
+    cnpj_digitos = somente_digitos(cnpj)
+    if cnpj.strip() and len(cnpj_digitos) != 14:
+        erros.append("CNPJ inválido. Deve conter 14 dígitos.")
 
     if erros:
         for e in erros:
             st.error(e)
     else:
-        with st.spinner("Enviando arquivo para processamento..."):
+        with st.spinner("Solicitando extração ao backend..."):
             try:
-                payload = montar_payload(email, arquivo)
+                payload = montar_payload(email, data_inicial, data_final, cnpj)
                 resp = enviar_para_n8n(WEBHOOK_URL, payload)
 
                 if 200 <= resp.status_code < 300:
-                    @st.dialog("Envio realizado")
+                    @st.dialog("Solicitação enviada")
                     def confirmacao():
-                        st.success("Arquivo enviado com sucesso!")
+                        st.success("Solicitação enviada com sucesso!")
                         st.write(
-                            f"O relatório processado será encaminhado para "
-                            f"**{email.strip()}** assim que o backend concluir "
-                            "o processamento."
+                            f"O relatório com os arquivos PDF e XML será encaminhado "
+                            f"para **{email.strip()}** assim que o backend concluir "
+                            "a extração."
                         )
+                        st.caption(
+                            "Período: "
+                            f"{data_inicial.strftime('%d/%m/%Y')} a "
+                            f"{data_final.strftime('%d/%m/%Y')}"
+                        )
+                        if cnpj_digitos:
+                            st.caption(f"CNPJ: {cnpj.strip()}")
                         st.caption(
                             f"Enviado em {datetime.now().strftime('%d/%m/%Y às %H:%M:%S')}"
                         )
@@ -249,6 +271,18 @@ if enviar:
                     with st.expander("Detalhes da resposta"):
                         st.code(resp.text or "(sem corpo)")
             except requests.exceptions.Timeout:
+                st.error("Tempo de resposta excedido. Verifique se o N8N está acessível.")
+            except requests.exceptions.ConnectionError:
+                st.error("Falha de conexão. Verifique a URL do webhook.")
+            except Exception as exc:
+                st.error(f"Erro inesperado: {exc}")
+
+
+# ============================================================
+# UI — Footer (vindo do template HTML)
+# ============================================================
+inject(render_template("footer", ano=datetime.now().year))
+ceptions.Timeout:
                 st.error("Tempo de resposta excedido. Verifique se o N8N está acessível.")
             except requests.exceptions.ConnectionError:
                 st.error("Falha de conexão. Verifique a URL do webhook.")
