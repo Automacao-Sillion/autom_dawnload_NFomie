@@ -47,7 +47,7 @@ def resolver_logo_url() -> str:
 # Config da página
 # ============================================================
 st.set_page_config(
-    page_title="Sillion · Dawnload de NFSe e XML",
+    page_title="Sillion · Download de NFSe e XML",
     page_icon="",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -161,7 +161,7 @@ def enviar_para_n8n(url: str, payload: dict) -> requests.Response:
 inject(render_template("header", logo_url=resolver_logo_url()))
 inject(render_template(
     "hero",
-    titulo="Dawnload de NFSe e XML",
+    titulo="Download de NFSe e XML",
     subtitulo="Extração de arquivos PDF e XML de acordo com o período selecionado.",
 ))
 
