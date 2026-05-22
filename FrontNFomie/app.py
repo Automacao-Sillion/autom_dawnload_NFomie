@@ -1,5 +1,5 @@
 """
-Download de NFSe e XML — Front Streamlit (Sillion)
+Download de NFSe/ XML/ Boleto — Front Streamlit (Sillion)
 Encaminha período (data inicial/final) + email + CNPJ (opcional) para o backend
 N8N via POST JSON. O backend retorna o relatório de extração por e-mail.
 
@@ -47,7 +47,7 @@ def resolver_logo_url() -> str:
 # Config da página
 # ============================================================
 st.set_page_config(
-    page_title="Sillion · Download de NFSe e XML",
+    page_title="Sillion · Download de NFSe/ XML/ Boleto",
     page_icon="",
     layout="centered",
     initial_sidebar_state="collapsed",
@@ -67,6 +67,9 @@ TIMEOUT_REQ = 120  # segundos
 
 # Opções de empresa/fonte a serem extraídas
 EMPRESAS_OPCOES = ["TOT", "VALE"]
+
+# Empresa solicitante (quem esta acionando o webhook)
+EMPRESA_SOLICITANTE_OPCOES = ["Sitrack", "Sillion"]
 
 
 # ============================================================
@@ -124,8 +127,24 @@ def somente_digitos(valor: str) -> str:
     return re.sub(r"\D", "", valor or "")
 
 
+def formatar_cnpj(valor: str) -> str:
+    """
+    Normaliza o CNPJ para o formato XX.XXX.XXX/YYYY-ZZ.
+    Retorna string vazia se o valor estiver vazio.
+    Retorna apenas os dígitos se não tiver exatamente 14 dígitos
+    (a validação a montante já barra esse caso).
+    """
+    d = somente_digitos(valor)
+    if not d:
+        return ""
+    if len(d) != 14:
+        return d
+    return f"{d[0:2]}.{d[2:5]}.{d[5:8]}/{d[8:12]}-{d[12:14]}"
+
+
 def montar_payload(
     email: str,
+    empresa_solicitante: str,
     data_inicial: date,
     data_final: date,
     empresas: list,
@@ -133,16 +152,18 @@ def montar_payload(
 ) -> dict:
     """
     Payload enviado ao backend N8N.
+    - empresa_solicitante: "Sitrack" ou "Sillion" (obrigatório)
     - data_inicial / data_final: ISO 8601 (YYYY-MM-DD)
     - empresas: lista com uma ou mais entre EMPRESAS_OPCOES (ex.: ["TOT", "VALE"])
-    - cnpj: apenas dígitos; string vazia quando não informado (opcional)
+    - cnpj: normalizado para XX.XXX.XXX/YYYY-ZZ ou "" se não informado
     """
     return {
         "email": email.strip(),
+        "empresa": empresa_solicitante,
         "data_inicial": data_inicial.isoformat(),
         "data_final": data_final.isoformat(),
         "empresas": list(empresas),
-        "cnpj": somente_digitos(cnpj),
+        "cnpj": formatar_cnpj(cnpj),
     }
 
 
@@ -161,7 +182,7 @@ def enviar_para_n8n(url: str, payload: dict) -> requests.Response:
 inject(render_template("header", logo_url=resolver_logo_url()))
 inject(render_template(
     "hero",
-    titulo="Download de NFSe e XML",
+    titulo="Download de NFSe/ XML/ Boleto",
     subtitulo="Extração de arquivos PDF e XML de acordo com o período selecionado.",
 ))
 
@@ -188,8 +209,16 @@ email = st.text_input(
          "O relatório processado será enviado para este endereço.",
 )
 
+empresa_solicitante = st.radio(
+    "Selecione a empresa:",
+    options=EMPRESA_SOLICITANTE_OPCOES,
+    index=None,
+    horizontal=True,
+    help="Empresa que está acionando esta extração (campo obrigatório).",
+)
+
 cnpj = st.text_input(
-    "CNPJ (opcional)",
+    "CNPJ do cliente (opcional)",
     placeholder="00.000.000/0000-00",
     help="Filtre a extração por um CNPJ específico. "
          "Deixe em branco para considerar todos os CNPJs.",
@@ -236,6 +265,9 @@ if enviar:
             "(ex: seu.nome@" + DOMINIO_PERMITIDO + ")."
         )
 
+    if not empresa_solicitante:
+        erros.append("Selecione a empresa (Sitrack ou Sillion).")
+
     if data_inicial is None:
         erros.append("Informe a data inicial.")
     if data_final is None:
@@ -257,7 +289,7 @@ if enviar:
     else:
         with st.spinner("Solicitando extração ao backend..."):
             try:
-                payload = montar_payload(email, data_inicial, data_final, empresas, cnpj)
+                payload = montar_payload(email, empresa_solicitante, data_inicial, data_final, empresas, cnpj)
                 resp = enviar_para_n8n(WEBHOOK_URL, payload)
 
                 if 200 <= resp.status_code < 300:
@@ -269,6 +301,7 @@ if enviar:
                             f"para **{email.strip()}** assim que o backend concluir "
                             "a extração."
                         )
+                        st.caption(f"Empresa: {empresa_solicitante}")
                         st.caption(
                             "Período: "
                             f"{data_inicial.strftime('%d/%m/%Y')} a "
