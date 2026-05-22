@@ -240,7 +240,7 @@ with col_fim:
     )
 
 empresas = st.multiselect(
-    "Empresas",
+    "Tipo de faturamento",
     options=EMPRESAS_OPCOES,
     default=[],
     placeholder="Selecione TOT, VALE ou ambas",
